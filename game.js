@@ -448,7 +448,15 @@ function groundSceneOffset() {
 function wobbleAmount() {
   if (state.stack.length < WOBBLE_START) return 0;
   const progress = Math.min(1, (state.stack.length - WOBBLE_START) / 36);
-  return progress * WOBBLE_MAX + state.wobbleBoost;
+  return (progress * WOBBLE_MAX + state.wobbleBoost) * mobileWobbleBoost();
+}
+
+function mobileWobbleBoost() {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width) return 1;
+  const visualScale = rect.width / W;
+  if (visualScale >= 0.55) return 1;
+  return Math.min(1.75, 1 + (0.55 - visualScale) * 2.1);
 }
 
 function wobbleX(strength = 1) {
