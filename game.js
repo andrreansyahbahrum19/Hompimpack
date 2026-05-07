@@ -337,6 +337,9 @@ const CLOUD_SPEED       = 28;   // px/sec horizontal drift
 const GRAVITY_FALL      = 1700;
 const GRAVITY_FAIL      = 1450;
 const AFTERNOON_SCORE   = 70;
+const WOBBLE_START      = 6;
+const WOBBLE_MAX        = 56;
+const WOBBLE_FREQ       = 2.25;
 
 // ─── State ───────────────────────────────────────────────────────────────────
 const state = {
@@ -357,6 +360,7 @@ const state = {
   fallingBox: null,
   stack: [],
   towerCollapsed: false,
+  wobbleBoost: 0,
   messageTimer: 0,
   inputReady: false,
   // Animation state
@@ -413,6 +417,7 @@ function resetGame() {
   state.fallingBox     = null;
   state.stack          = [];
   state.towerCollapsed = false;
+  state.wobbleBoost    = 0;
   state.messageTimer   = 0;
   state.inputReady     = false;
   state.landAnim       = 0;
@@ -440,12 +445,24 @@ function groundSceneOffset() {
   return sinkOffset() + Math.max(0, -state.cameraY);
 }
 
+function wobbleAmount() {
+  if (state.stack.length < WOBBLE_START) return 0;
+  const progress = Math.min(1, (state.stack.length - WOBBLE_START) / 36);
+  return progress * WOBBLE_MAX + state.wobbleBoost;
+}
+
+function wobbleX(strength = 1) {
+  const amount = wobbleAmount();
+  if (amount <= 0) return 0;
+  return Math.sin(state.time * WOBBLE_FREQ + state.stack.length * 0.38) * amount * strength;
+}
+
 function currentTarget() {
   if (state.stack.length === 0) {
     return { x: STACK_BASE.x, y: STACK_BASE.y, w: STACK_BASE.w, first: true };
   }
   const top = state.stack[state.stack.length - 1];
-  return { x: top.x, y: top.y - BOX_H * 0.96, w: BOX_W, first: false };
+  return { x: top.x + wobbleX(), y: top.y - BOX_H * 0.96, w: BOX_W, first: false };
 }
 
 // ─── Input ───────────────────────────────────────────────────────────────────
@@ -529,6 +546,7 @@ function landFallingBox() {
   state.messageTimer   = 0.42;
   state.fallingBox     = null;
   state.carriedBox     = true;
+  state.wobbleBoost    = Math.min(36, state.wobbleBoost + Math.abs(offset) / 11);
   state.craneSpeed     = CRANE_INIT_SPEED + Math.min(CRANE_SPEED_MAX, Math.pow(state.score, 1.08) * CRANE_SPEED_INC);
   state.targetCameraY  = cameraForTopStack();
   state.landAnim       = 0.22;
@@ -613,6 +631,7 @@ function update(dt) {
     state.messageTimer   = Math.max(0, state.messageTimer - dt);
     state.landAnim       = Math.max(0, state.landAnim - dt);
     state.scorePopAnim   = Math.max(0, state.scorePopAnim - dt);
+    state.wobbleBoost    = Math.max(0, state.wobbleBoost - dt * 8);
 
     // Update stack squash timers
     state.stack.forEach(b => { if (b.squashTimer > 0) b.squashTimer = Math.max(0, b.squashTimer - dt); });
@@ -785,9 +804,9 @@ function drawHUD() {
   // Score pop animation
   const popScale = 1 + (state.scorePopAnim / 0.35) * 0.18;
   ctx.save();
-  ctx.translate(262, hudY + 49);
+  ctx.translate(249, hudY + 51);
   ctx.scale(popScale, popScale);
-  drawSpriteNumber(formatScore(state.score, 3), 0, -19, 105, 38, "center");
+  drawSpriteNumber(formatScore(state.score, 3), 0, -18, 105, 38, "center");
   ctx.restore();
 
   drawSpriteNumber(formatScore(state.highScore, 3), 900, hudY + 30, 105, 38, "center");
@@ -813,7 +832,10 @@ function drawMotor() {
 // ─── Stack ───────────────────────────────────────────────────────────────────
 function drawStack() {
   const sink = sinkOffset();
+  const stackWobble = wobbleX();
   state.stack.forEach((box, idx) => {
+    const heightRatio = state.stack.length <= 1 ? 0 : idx / (state.stack.length - 1);
+    const screenX = box.x + stackWobble * heightRatio;
     const screenY = worldToScreenY(box.y - BOX_H / 2) + sink;
     const isTop   = idx === state.stack.length - 1;
     // Squash on fresh land
@@ -824,7 +846,7 @@ function drawStack() {
       sx = 1 + sq * 0.14;
       sy = 1 - sq * 0.10;
     }
-    drawBox(box.x, screenY, box.rotation, sx, sy);
+    drawBox(screenX, screenY, box.rotation + (stackWobble / 850) * heightRatio, sx, sy);
   });
 }
 
@@ -869,7 +891,7 @@ function drawBox(x, y, rotation, sx, sy) {
 // ─── Result screen ────────────────────────────────────────────────────────────
 function drawResult() {
   ctx.save();
-  ctx.fillStyle = "rgba(20, 35, 85, 0.62)";
+  ctx.fillStyle = "rgba(20, 35, 85, 0.24)";
   ctx.fillRect(0, 0, W, H);
 
   if (assets.endingPanel) ctx.drawImage(assets.endingPanel, 154, 294, 772, 1013);
