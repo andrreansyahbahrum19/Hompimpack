@@ -340,6 +340,9 @@ const AFTERNOON_SCORE   = 70;
 const WOBBLE_START      = 6;
 const WOBBLE_MAX        = 56;
 const WOBBLE_FREQ       = 2.25;
+const BOX_MIN_SCALE     = 0.76;
+const BOX_SHRINK_START  = 5;
+const BOX_SHRINK_RATE   = 0.006;
 
 // ─── State ───────────────────────────────────────────────────────────────────
 const state = {
@@ -387,7 +390,7 @@ const CARRIED_OFFSET = { x: 0, y: -58 };
 // Motor
 const MOTOR_W = 772;
 const MOTOR_H = 754;
-const MOTOR_REST_X = 159;
+const MOTOR_REST_X = 95;
 const MOTOR_REST_Y_WORLD = 1310;
 
 // ─── Asset loading ────────────────────────────────────────────────────────────
@@ -437,12 +440,29 @@ function sinkOffset(extra = 0) {
 function cameraForTopStack() {
   if (state.stack.length < 4) return 0;
   const top = state.stack[state.stack.length - 1];
-  const topScreenWithoutCamera = top.y - BOX_H / 2 + sinkOffset();
+  const topScreenWithoutCamera = top.y - boxHeightAtScale(top.scale) / 2 + sinkOffset();
   return Math.min(0, topScreenWithoutCamera - STACK_FOCUS_Y);
 }
 
 function groundSceneOffset() {
   return sinkOffset() + Math.max(0, -state.cameraY);
+}
+
+function boxScaleForScore(score) {
+  const shrink = Math.max(0, score - BOX_SHRINK_START) * BOX_SHRINK_RATE;
+  return Math.max(BOX_MIN_SCALE, 1 - shrink);
+}
+
+function currentBoxScale() {
+  return boxScaleForScore(state.score);
+}
+
+function boxWidthAtScale(scale) {
+  return BOX_W * (scale || 1);
+}
+
+function boxHeightAtScale(scale) {
+  return BOX_H * (scale || 1);
 }
 
 function wobbleAmount() {
@@ -467,10 +487,18 @@ function wobbleX(strength = 1) {
 
 function currentTarget() {
   if (state.stack.length === 0) {
-    return { x: STACK_BASE.x, y: STACK_BASE.y, w: STACK_BASE.w, first: true };
+    return { x: STACK_BASE.x, y: STACK_BASE.y, scale: 1, w: STACK_BASE.w, h: BOX_H, first: true };
   }
   const top = state.stack[state.stack.length - 1];
-  return { x: top.x + wobbleX(), y: top.y - BOX_H * 0.96, w: BOX_W, first: false };
+  const nextScale = currentBoxScale();
+  return {
+    x: top.x + wobbleX(),
+    y: top.y - boxHeightAtScale((top.scale + nextScale) * 0.5) * 0.96,
+    scale: nextScale,
+    w: boxWidthAtScale(nextScale),
+    h: boxHeightAtScale(nextScale),
+    first: false,
+  };
 }
 
 // ─── Input ───────────────────────────────────────────────────────────────────
@@ -513,12 +541,14 @@ function handleInput(e) {
 function dropBox() {
   const hookX = CRANE_ANCHOR.x - Math.sin(state.craneAngle) * CRANE_ANCHOR.length;
   const hookY = CRANE_ANCHOR.y + Math.cos(state.craneAngle) * CRANE_ANCHOR.length;
+  const scale = currentBoxScale();
   const bx    = hookX + CARRIED_OFFSET.x;
-  const by    = hookY + CARRIED_OFFSET.y + BOX_H / 2;
+  const by    = hookY + CARRIED_OFFSET.y + boxHeightAtScale(scale) / 2;
   const worldY = by + state.cameraY - sinkOffset(1);
 
   state.fallingBox = {
     x: bx, y: worldY, vx: 0, vy: 0,
+    scale,
     rotation: state.craneAngle * 0.08,
     rotationVel: (Math.random() - 0.5) * 0.25,
     squashX: 1, squashY: 1,  // for landing squash
@@ -532,7 +562,8 @@ function landFallingBox() {
   const target = currentTarget();
   const offset = box.x - target.x;
   const requiredOverlap = target.first ? 0.24 : Math.min(0.52, 0.30 + state.score * 0.01);
-  const maxOff = BOX_W * (1 - requiredOverlap);
+  const activeWidth = Math.min(boxWidthAtScale(box.scale), target.w);
+  const maxOff = activeWidth * (1 - requiredOverlap);
 
   if (Math.abs(offset) > maxOff) { failGame(); return; }
 
@@ -542,6 +573,7 @@ function landFallingBox() {
 
   state.stack.push({
     x: landedX, y: landedY,
+    scale: box.scale,
     rotation: stackLean,
     vx: 0, vy: 0, rotationVel: 0,
     squashTimer: 0.22,   // squash animation countdown
@@ -568,7 +600,7 @@ function landFallingBox() {
   const recentStack = state.stack.slice(-12);
   const lean = recentStack.reduce((s, item) => s + Math.abs(item.rotation), 0);
   const topDrift = Math.abs(landedX - STACK_BASE.x);
-  const driftLimit = BOX_W * (1.15 + Math.min(2.2, state.stack.length * 0.018));
+  const driftLimit = boxWidthAtScale(box.scale) * (1.15 + Math.min(2.2, state.stack.length * 0.018));
   if (!target.first && (lean > 2.55 || topDrift > driftLimit)) failGame({ collapseTower: true });
 }
 
@@ -675,7 +707,7 @@ function updateFallingBox(dt) {
   box.rotation += box.rotationVel * dt;
 
   const target  = currentTarget();
-  const screenY = worldToScreenY(box.y + BOX_H / 2) + sinkOffset(1);
+  const screenY = worldToScreenY(box.y + boxHeightAtScale(box.scale) / 2) + sinkOffset(1);
   if (box.vy > 0 && screenY >= worldToScreenY(target.y) + sinkOffset()) {
     landFallingBox();
   }
@@ -842,9 +874,10 @@ function drawStack() {
   const sink = sinkOffset();
   const stackWobble = wobbleX();
   state.stack.forEach((box, idx) => {
+    const boxH = boxHeightAtScale(box.scale);
     const heightRatio = state.stack.length <= 1 ? 0 : idx / (state.stack.length - 1);
     const screenX = box.x + stackWobble * heightRatio;
-    const screenY = worldToScreenY(box.y - BOX_H / 2) + sink;
+    const screenY = worldToScreenY(box.y - boxH / 2) + sink;
     const isTop   = idx === state.stack.length - 1;
     // Squash on fresh land
     let sx = 1, sy = 1;
@@ -854,7 +887,7 @@ function drawStack() {
       sx = 1 + sq * 0.14;
       sy = 1 - sq * 0.10;
     }
-    drawBox(screenX, screenY, box.rotation + (stackWobble / 850) * heightRatio, sx, sy);
+    drawBox(screenX, screenY, box.rotation + (stackWobble / 850) * heightRatio, sx, sy, box.scale);
   });
 }
 
@@ -873,7 +906,7 @@ function drawCraneAndCarried() {
   if (state.mode === "play" && state.carriedBox) {
     const tip = craneTip();
     // Gentle sway tilt
-    drawBox(tip.x, tip.y, state.craneAngle * 0.08, 1, 1);
+    drawBox(tip.x, tip.y, state.craneAngle * 0.08, 1, 1, currentBoxScale());
   }
 }
 
@@ -881,18 +914,20 @@ function drawCraneAndCarried() {
 function drawFallingBox() {
   if (!state.fallingBox) return;
   const box     = state.fallingBox;
-  const screenY = worldToScreenY(box.y - BOX_H / 2) + sinkOffset(1);
-  drawBox(box.x, screenY, box.rotation, 1, 1);
+  const screenY = worldToScreenY(box.y - boxHeightAtScale(box.scale) / 2) + sinkOffset(1);
+  drawBox(box.x, screenY, box.rotation, 1, 1, box.scale);
 }
 
 // ─── Box draw (with squash/stretch) ─────────────────────────────────────────
-function drawBox(x, y, rotation, sx, sy) {
+function drawBox(x, y, rotation, sx, sy, scale = 1) {
   if (!assets.box) return;
+  const drawW = boxWidthAtScale(scale);
+  const drawH = boxHeightAtScale(scale);
   ctx.save();
-  ctx.translate(x, y + BOX_H / 2);
+  ctx.translate(x, y + drawH / 2);
   ctx.rotate(rotation);
   if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
-  ctx.drawImage(assets.box, -BOX_W / 2, -BOX_H / 2, BOX_W, BOX_H);
+  ctx.drawImage(assets.box, -drawW / 2, -drawH / 2, drawW, drawH);
   ctx.restore();
 }
 
