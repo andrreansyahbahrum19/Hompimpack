@@ -3,9 +3,21 @@
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+const rootStyle = getComputedStyle(document.documentElement);
 
 const W = canvas.width;   // 1080
 const H = canvas.height;  // 1920
+
+function cssPxToCanvas(px) {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.height) return 0;
+  return px * (H / rect.height);
+}
+
+function safeTopCanvasOffset() {
+  const value = parseFloat(rootStyle.getPropertyValue("--safe-top")) || 0;
+  return Math.min(90, cssPxToCanvas(value));
+}
 
 // ─── Web Audio ───────────────────────────────────────────────────────────────
 let audioCtx = null;
@@ -766,18 +778,19 @@ function drawBackground() {
 
 // ─── HUD ─────────────────────────────────────────────────────────────────────
 function drawHUD() {
-  if (assets.scoreCurrent) ctx.drawImage(assets.scoreCurrent, 68, 81, 275, 101.5);
-  if (assets.scoreHigh)    ctx.drawImage(assets.scoreHigh,   720, 81, 274.5, 97.5);
+  const hudY = 81 + safeTopCanvasOffset();
+  if (assets.scoreCurrent) ctx.drawImage(assets.scoreCurrent, 68, hudY, 275, 101.5);
+  if (assets.scoreHigh)    ctx.drawImage(assets.scoreHigh,   720, hudY, 274.5, 97.5);
 
   // Score pop animation
   const popScale = 1 + (state.scorePopAnim / 0.35) * 0.18;
   ctx.save();
-  ctx.translate(262, 130);
+  ctx.translate(262, hudY + 49);
   ctx.scale(popScale, popScale);
   drawSpriteNumber(formatScore(state.score, 3), 0, -19, 105, 38, "center");
   ctx.restore();
 
-  drawSpriteNumber(formatScore(state.highScore, 3), 900, 111, 105, 38, "center");
+  drawSpriteNumber(formatScore(state.highScore, 3), 900, hudY + 30, 105, 38, "center");
 }
 
 // ─── Motor ───────────────────────────────────────────────────────────────────
